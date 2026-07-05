@@ -141,6 +141,22 @@ first deploy**:
 
 ---
 
+## Forward-compat: the rope registry (for a future climb mechanic)
+
+`RopeRegistry` exposes each segment's geometry as cheap pure functions so a future system can read
+it **every tick without entity-scanning** — e.g. a climb detector asking "is the player's hitbox
+near a near-vertical segment?":
+
+- `geometryOf(segment)` → slope, `pitch()`, `isNearVertical(minPitchRadians)`
+- `distanceToSegment(segment, x, y, z)` — clamped point-to-segment distance
+- `nearestClimbable(dim, x, y, z, radius, minPitchRadians)` — the nearest steep rope, from stored
+  endpoints alone (no world/entity lookup)
+
+The endpoint mobs are also set **no-collision** (a `collisionRule=never` team) and **no-physics**,
+so players standing at an endpoint can't shove the anchor and stretch/snap the rope. None of this
+changes tie/cut/render today; it just keeps the door open for pitch-controlled climbing without a
+refactor.
+
 ## The spike
 
 The mechanism, the 11-block ceiling, the reload survival, and the knot-to-knot-fails finding were

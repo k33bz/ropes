@@ -45,4 +45,47 @@ class RopeMathTest {
         assertEquals(1, RopeMath.clampMaxSpan(0));
         assertEquals(5, RopeMath.clampMaxSpan(5));
     }
+
+    // --- registry geometry (forward-compat for a climb detector) ---
+
+    private static RopeStore.Segment seg(int[] a, int[] b) {
+        return new RopeStore.Segment("minecraft:overworld", a, b, "00000000-0000-0000-0000-000000000000", null);
+    }
+
+    @Test
+    void verticalSegmentIsNearVertical() {
+        var g = RopeRegistry.geometryOf(seg(new int[] {0, 64, 0}, new int[] {0, 70, 0}));
+        assertEquals(Double.POSITIVE_INFINITY, g.slope());
+        assertTrue(g.isNearVertical(Math.toRadians(60)));
+        assertEquals(Math.PI / 2, g.pitch(), 1e-9);
+    }
+
+    @Test
+    void flatSegmentIsNotNearVertical() {
+        var g = RopeRegistry.geometryOf(seg(new int[] {0, 64, 0}, new int[] {6, 64, 0}));
+        assertEquals(0.0, g.slope(), 1e-9);
+        assertFalse(g.isNearVertical(Math.toRadians(60)));
+    }
+
+    @Test
+    void distanceToSegmentClampsToExtent() {
+        // horizontal rope from (0,64,0) to (6,64,0); a point beside its midpoint is ~1 block off.
+        var s = seg(new int[] {0, 64, 0}, new int[] {6, 64, 0});
+        double mid = RopeRegistry.distanceToSegment(s, 3.5, 65.5, 0.5); // centre-ish, 1 above line
+        assertTrue(mid < 1.2 && mid > 0.9, "off-by-~1 beside the midpoint, got " + mid);
+        // A point far past the end clamps to the endpoint, not the infinite line.
+        double past = RopeRegistry.distanceToSegment(s, 100.0, 64.5, 0.5);
+        assertTrue(past > 90.0);
+    }
+
+    @Test
+    void diagonalPitchIsBetween() {
+        // rise 6 over run 6 → 45° → climbable at a 40° threshold, not at 60°.
+        var g = RopeRegistry.geometryOf(seg(new int[] {0, 64, 0}, new int[] {6, 70, 0}));
+        assertEquals(Math.toRadians(45), g.pitch(), 1e-9);
+        assertTrue(g.isNearVertical(Math.toRadians(40)));
+        assertFalse(g.isNearVertical(Math.toRadians(60)));
+    }
 }
+// NOTE: nearestClimbable() over RopeStore is covered at runtime, not here — RopeStore.segments()
+// lazily loads via FabricLoader.getConfigDir(), which isn't available in a pure-JUnit context.

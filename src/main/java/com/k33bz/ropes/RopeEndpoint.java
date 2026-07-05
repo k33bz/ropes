@@ -1,10 +1,12 @@
 package com.k33bz.ropes;
 
 import net.minecraft.core.BlockPos;
+import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.network.chat.Component;
+import net.minecraft.resources.Identifier;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.EntitySpawnReason;
-import net.minecraft.world.entity.EntityTypes;
+import net.minecraft.world.entity.EntityType;
 import net.minecraft.world.entity.Leashable;
 import net.minecraft.world.entity.Mob;
 import net.minecraft.world.entity.ambient.Bat;
@@ -32,6 +34,26 @@ public final class RopeEndpoint {
     public static final String TAG = "ropes_endpoint";
 
     /**
+     * Scoreboard team with {@code collisionRule=never} that every endpoint joins, so players
+     * (a future climb mechanic puts them right at the endpoints) can't push the anchor mob around
+     * and stretch/snap the rope. Team collision is a pure-command, cross-version-stable no-push.
+     */
+    public static final String TEAM = "ropes_nocollide";
+
+    /**
+     * The bat entity type, looked up from the registry rather than a static field, because the
+     * holder class was renamed {@code EntityType}&rarr;{@code EntityTypes} between 26.1.2 and 26.2 —
+     * the registry lookup compiles identically on both branches (the whole point of "same code,
+     * only dep pins differ"). {@code ENTITY_TYPE} is a defaulted registry, so this never returns
+     * null for the vanilla {@code minecraft:bat} key.
+     */
+    @SuppressWarnings("unchecked")
+    private static EntityType<Bat> batType() {
+        return (EntityType<Bat>) BuiltInRegistries.ENTITY_TYPE.getValue(
+                Identifier.withDefaultNamespace("bat"));
+    }
+
+    /**
      * Spawn a pinned invisible endpoint bat at the centre of {@code fenceB}, tagged and leashed
      * to {@code knotA}. Retries the {@link Leashable#setLeashedTo attach} until a read-back
      * confirms {@code getLeashHolder() == knotA} (the spike warned an attach can silently no-op
@@ -39,10 +61,11 @@ public final class RopeEndpoint {
      * leash could not be confirmed after all retries (caller must not consume a Rope then).
      */
     public static UUID spawnLeashed(ServerLevel level, BlockPos fenceB, LeashFenceKnotEntity knotA) {
+        ensureTeam(level);
         // create(Level, EntitySpawnReason) then position via pin()/snapTo — the 3-arg
         // (ServerLevel, BlockPos, reason) overload resolves ambiguously against the ValueInput
         // spawn family in 26.x, so we use the unambiguous 2-arg factory.
-        Entity e = EntityTypes.BAT.create(level, EntitySpawnReason.COMMAND);
+        Entity e = batType().create(level, EntitySpawnReason.COMMAND);
         if (!(e instanceof Bat bat)) {
             Ropes.LOGGER.warn("[ropes] could not create endpoint bat at {}", fenceB.toShortString());
             return null;
@@ -53,6 +76,7 @@ public final class RopeEndpoint {
             bat.discard();
             return null;
         }
+        joinNoCollideTeam(level, bat);
         if (!attachConfirmed(bat, knotA)) {
             Ropes.LOGGER.warn("[ropes] leash attach could not be confirmed for endpoint {}", bat.getUUID());
             bat.discard();
@@ -61,7 +85,24 @@ public final class RopeEndpoint {
         return bat.getUUID();
     }
 
-    /** Make a bat a silent, pinned, invisible, undespawnable rope end at {@code pos}. */
+    /** Create the no-collision team once (idempotent; a re-run just re-sets the option). */
+    private static void ensureTeam(ServerLevel level) {
+        RopeKnots.run(level, "team add " + TEAM);
+        RopeKnots.run(level, "team modify " + TEAM + " collisionRule never");
+    }
+
+    /** Put an endpoint on the no-collision team by its UUID. */
+    private static void joinNoCollideTeam(ServerLevel level, Bat bat) {
+        RopeKnots.run(level, "team join " + TEAM + " " + bat.getUUID());
+    }
+
+    /**
+     * Make a bat a silent, pinned, invisible, undespawnable, <b>no-collision / no-push</b> rope
+     * end at {@code pos}. The no-push properties ({@code noPhysics} + the no-collision team) keep a
+     * future climb mechanic — which puts players right at the endpoints — from shoving the anchor
+     * around and stretching/snapping the rope. They're harmless to tie/cut/render today (the leash
+     * renders off the entity's position regardless of collision).
+     */
     public static void pin(Bat bat, BlockPos pos) {
         bat.setInvisible(true);
         bat.setNoGravity(true);
@@ -70,6 +111,7 @@ public final class RopeEndpoint {
         bat.setPersistenceRequired();
         bat.setInvulnerable(true);
         bat.setResting(false);
+        bat.noPhysics = true; // no block collision — never nudged by physics
         bat.setCustomName(Component.literal("Rope"));
         bat.setCustomNameVisible(false);
         bat.addTag(TAG);
