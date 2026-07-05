@@ -160,9 +160,12 @@ public class Ropes implements ModInitializer {
         });
     }
 
-    /** Periodic re-verification sweep (re-anchor lost endpoints defensively). */
+    /** Per-tick: rope climbing (every tick) + periodic re-verification sweep. */
     private void registerTick() {
         ServerTickEvents.END_SERVER_TICK.register(server -> {
+            // Climbing runs every tick (status-effect driven; cheap registry query, no entity scan).
+            RopeClimb.tick(server);
+
             if (CONFIG.verifyIntervalTicks <= 0) {
                 return;
             }
