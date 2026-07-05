@@ -12,13 +12,6 @@ base {
 }
 
 loom {
-    // 26.2 branch: isolated run dir — never let a 26.2 server touch (and upgrade!) a
-    // 26.1.2 dev world that lives in run/.
-    runs {
-        server {
-            runDir "run262"
-        }
-    }
 }
 
 repositories {
