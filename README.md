@@ -119,43 +119,105 @@ Knobs live in a separate **`config/ropes.json`**:
   "verifyIntervalTicks": 200, // periodic re-verification sweep (0 = boot/chunk-load only)
   "showKnots": true,          // decorative knot caps at tie-points
   "knotScale": 0.35,          // knot-cap item_display scale
-  "knotHeadTexture": ""       // optional player-head texture for a themed knot cap
+  "knotHeadTexture": "",      // optional player-head texture for a themed knot cap
+  "climbEnabled": true,       // rope climbing (see Climbing section for the rest)
+  "climbMinAngleDeg": 75.0, "climbReach": 0.6, "climbLookDeg": 30.0,
+  "climbFloorRate": 0.4, "climbVerticalRate": 0.9, "climbMaxRate": 1.8,
+  "climbResetFallWhileTouching": true
 }
 ```
 
 ---
 
-## ⚠️ One open item — verify on first deploy
+## ⚠️ Open items — verify on first deploy
 
 The [spike](#the-spike) proved the leash attachment is real **server-side** (RCON
 `data get entity … leash` resolves to the fence knot) at any angle, and that it survives reload.
-But the test harness's viewer cannot draw leashes, so **one thing needs a real-client eyeball on
-first deploy**:
+The v0.2.0 climb tests prove the mechanism and rate model server-side. A few things are
+**client-side feel/render** that only a real vanilla client can confirm:
 
-> **Does a vanilla 26.x client visibly render the rope** between the fence knot and the synthetic
-> invisible endpoint mob (diagonal + vertical), and does it look continuous across chained
-> segments? It almost certainly does — this is the *same* leash mechanism vanilla draws for every
-> leashed animal — but it has not been eyeballed on a real client yet. Likewise the decorative
-> knot caps' client-visual is confirmed server-side (the `item_display` entities spawn + are
-> tagged) but their on-screen look is part of the same first-deploy eyeball check.
+> 1. **Does a vanilla 26.x client visibly render the rope** between the fence knot and the
+>    synthetic invisible endpoint mob (diagonal + vertical), continuous across chained segments?
+>    (Same leash mechanism vanilla draws for every leashed animal — almost certainly yes.)
+> 2. **Climb feel/render**: bots measure server-applied rates and effects, but mineflayer (through
+>    the ViaProxy 1.21↔26.x bridge) does not faithfully reproduce effect-driven vertical movement,
+>    so the *client-visible* climb — the ascend/descend feel, the free-fall-on-release damage, and
+>    stopping cleanly at a ledge top — is a **human playtest item**. Server-side these are proven:
+>    the mod applies hidden Levitation/Slow-Falling on contact, the headroom gate stops the rise
+>    below a ceiling with zero suffocation damage, below-gate ropes don't climb, and fall distance
+>    is reset only while climbing.
+> 3. Decorative **knot caps** spawn + are tagged server-side; their on-screen look is part of the
+>    same eyeball check.
 
 ---
 
-## Forward-compat: the rope registry (for a future climb mechanic)
+## Climbing (v0.2.0)
 
-`RopeRegistry` exposes each segment's geometry as cheap pure functions so a future system can read
-it **every tick without entity-scanning** — e.g. a climb detector asking "is the player's hitbox
-near a near-vertical segment?":
+Steep ropes are **climbable**. Climbing is driven entirely by **hidden status effects** (no
+velocity rubber-banding), computed once per tick per player from the rope registry — no entity
+scanning.
 
-- `geometryOf(segment)` → slope, `pitch()`, `isNearVertical(minPitchRadians)`
-- `distanceToSegment(segment, x, y, z)` — clamped point-to-segment distance
-- `nearestClimbable(dim, x, y, z, radius, minPitchRadians)` — the nearest steep rope, from stored
-  endpoints alone (no world/entity lookup)
+**Being in contact:** within `climbReach` (default 0.6 blocks) of a segment whose slope is at
+least `climbMinAngleDeg` (default 75°). Ropes flatter than the gate are **aesthetic only** — you
+can stand on or clip them, but not climb (`k33bz: "clipping is fine"`).
 
-The endpoint mobs are also set **no-collision** (a `collisionRule=never` team) and **no-physics**,
-so players standing at an endpoint can't shove the anchor and stretch/snap the rope. None of this
-changes tie/cut/render today; it just keeps the door open for pitch-controlled climbing without a
-refactor.
+**Look / sneak → action** (a treading-water model, no hover):
+
+| Input | Action | Effect |
+|---|---|---|
+| Look **up** (pitch < −`climbLookDeg`, default 30°) | **Ascend** | hidden Levitation |
+| Look **level or down** | **Descend** | hidden Slow Falling drift |
+| Hold **sneak** | **Release** | nothing applied; a normal fall (with damage) begins |
+
+Effects are applied **hidden** — `showParticles=false, showIcon=false` — so there are no
+levitation sparkles or HUD icon; it looks like natural climbing. Leaving contact actively removes
+the Levitation, so you **stop at a ledge** instead of rocketing past the top.
+
+**Rate scales with angle** off a fixed floor: gentle at the gate, faster toward vertical, hard-capped
+below the vanilla ladder (~2.35 b/s). See the rate-mechanism note below.
+
+**Headroom suffocation gate** (always on, not configurable): before an ascend tick, if the block
+you'd rise into is solid, the lift is skipped that tick — you're never forced up into a ceiling.
+
+**Fall damage:** while climbing (in contact, not sneaking) your fall distance is reset every tick,
+so climbing is damage-free. Sneak-release or leaving contact stops the reset — a fall from the
+contact point deals normal damage.
+
+### Config (climb knobs, in `config/ropes.json`)
+
+```jsonc
+{
+  "climbEnabled": true,
+  "climbMinAngleDeg": 75.0,      // gate: flatter ropes are aesthetic-only
+  "climbReach": 0.6,             // contact distance to the segment line
+  "climbLookDeg": 30.0,          // look-up past this to ascend; else descend
+  "climbFloorRate": 0.4,         // curve floor at the gate (see rate note)
+  "climbVerticalRate": 0.9,      // curve mid at vertical (config)
+  "climbMaxRate": 1.8,           // hard cap (< ladder 2.35)
+  "climbResetFallWhileTouching": true
+}
+```
+
+### The rate mechanism (measured, v0.2.0)
+
+Levitation amplitude is an integer effect; measured server-authoritative rates on 26.1.2 (applied
+continuously every tick, which is how the mod applies it) are **amp0 = 0.891 b/s** and
+**amp1 = 1.806 b/s** — both safely below the ladder's ~2.35 b/s.
+
+A sub-amp0 target (like the 0.4 config floor) would require a duty cycle that **removes** levitation
+on off-ticks, and gravity on those ticks makes the low net rate jittery/bouncy. Per the design's
+explicit fallback, the delivered climb therefore **floors at continuous amp0 (~0.9 b/s)** — "usable,
+not a crawl" — and **scales up toward the cap** by duty-blending between amp0 and amp1 as the rope
+steepens (steeper = faster). The `climbFloorRate`/`climbVerticalRate` config values are retained but
+the effective floor is clamped up to amp0; this tradeoff is documented in `ClimbRate`.
+
+### Forward-compat / internals: the rope registry
+
+`RopeRegistry` exposes each segment's geometry as cheap pure functions read every tick with no
+entity-scanning: `geometryOf` (slope / `pitch()` / `isNearVertical`), `distanceToSegment` (clamped
+point-to-segment), and `nearestClimbable`. The climb detector runs entirely off these stored
+endpoints. Endpoint mobs are also **no-collision** (`collisionRule=never` team) and **no-physics**,
+so a climbing player at an endpoint can't shove the anchor and stretch/snap the rope.
 
 ## The spike
 

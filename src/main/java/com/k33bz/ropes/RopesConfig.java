@@ -55,6 +55,52 @@ public class RopesConfig {
      */
     public String knotHeadTexture = "";
 
+    // --- rope climbing (v0.2.0) ---
+    /** Master switch for the climb system. When off, ropes are decorative-only. */
+    public boolean climbEnabled = true;
+
+    /**
+     * Minimum segment steepness (degrees above horizontal) that counts as climbable. Segments
+     * flatter than this are purely aesthetic bridges — you can stand on / clip them but not climb.
+     * Default 75°.
+     */
+    public double climbMinAngleDeg = 75.0;
+
+    /**
+     * How close (blocks, clamped point-to-segment distance) a player must be to a segment to be
+     * "in contact" and able to climb it. Default 0.6.
+     */
+    public double climbReach = 0.6;
+
+    /**
+     * Look threshold (degrees). Looking UP by more than this (pitch &lt; -climbLookDeg) ascends;
+     * looking level or down descends. Default 30°.
+     */
+    public double climbLookDeg = 30.0;
+
+    /**
+     * Ascend rate (blocks/second) at the gate angle ({@link #climbMinAngleDeg}) — the floor of the
+     * angle&rarr;rate curve. Default 0.4. (See {@link ClimbRate}; the effect-duty-cycle
+     * implementation may floor higher — documented at runtime.)
+     */
+    public double climbFloorRate = 0.4;
+
+    /** Ascend rate (blocks/second) at a vertical (90°) segment — the top of the curve. Default 0.9. */
+    public double climbVerticalRate = 0.9;
+
+    /**
+     * Hard cap (blocks/second) on ascend rate, regardless of angle. Default 1.8. MUST stay below
+     * the vanilla ladder ascend (~2.35 b/s) — asserted in {@link ClimbRate} tests.
+     */
+    public double climbMaxRate = 1.8;
+
+    /**
+     * Reset the player's fall distance to 0 every tick while in contact and NOT sneaking, so
+     * climbing accrues no fall damage. Releasing (sneak) or leaving contact stops the reset, so a
+     * normal fall from the contact point deals damage. Default true.
+     */
+    public boolean climbResetFallWhileTouching = true;
+
     // ------------------------------------------------------------------
 
     private static final Gson GSON = new GsonBuilder().setPrettyPrinting().create();
