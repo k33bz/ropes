@@ -1,0 +1,25 @@
+# Gradle
+.gradle/
+build/
+out/
+
+# Loom / Fabric — run dirs for every MC-version branch (run/, run262/, ...)
+.fabric/
+run/
+run[0-9]*/
+remappedSrc/
+
+# Dev-server console logs (from ./gradlew runServer)
+run_*.log
+run[0-9]*.log
+
+# IDE
+.idea/
+*.iml
+.vscode/
+.kiro/
+*.ipr
+*.iws
+
+# OS
+.DS_Store

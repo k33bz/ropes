@@ -1,0 +1,21 @@
+{
+  "type": "minecraft:crafting_shapeless",
+  "category": "misc",
+  "group": "ropes",
+  "ingredients": [
+    "minecraft:lead",
+    "minecraft:string"
+  ],
+  "result": {
+    "id": "minecraft:lead",
+    "count": 2,
+    "components": {
+      "minecraft:custom_data": "{ropes_item:1b}",
+      "minecraft:custom_name": "{\"text\":\"Rope\",\"color\":\"white\",\"italic\":false}",
+      "minecraft:lore": [
+        "{\"text\":\"Right-click two fence posts to string a rope between them.\",\"color\":\"gray\",\"italic\":true}",
+        "{\"text\":\"Max 11 blocks per segment — chain from a knot for longer runs.\",\"color\":\"dark_gray\",\"italic\":true}"
+      ]
+    }
+  }
+}

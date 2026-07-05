@@ -1,0 +1,51 @@
+name: build
+
+on:
+  push:
+    branches: [main, '26.*']
+  pull_request:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 25
+          cache: gradle
+      - name: Build + tests
+        run: ./gradlew build
+      - name: Diagnose mappings (only on failure)
+        if: failure()
+        run: |
+          J=$(find ~/.gradle/caches/fabric-loom -name "*minecraft*.jar" 2>/dev/null | grep -viE "sources|javadoc|intermediary" | head -1)
+          echo "== $J"
+          echo "== leash / Leashable API (the whole mod hangs on this)"
+          javap -cp "$J" net.minecraft.world.entity.Leashable 2>/dev/null | head -30
+          javap -cp "$J" net.minecraft.world.entity.Leashable\$LeashData 2>/dev/null | head -20
+          unzip -l "$J" 2>/dev/null | grep -iE "Leashable|LeashFenceKnot|Leash" | head -20 || true
+          echo "== leash_knot entity"
+          javap -cp "$J" net.minecraft.world.entity.decoration.LeashFenceKnotEntity 2>/dev/null | grep -iE "public|getOrCreate|knot" | head -20
+          echo "== data components (leash component lives here)"
+          unzip -l "$J" 2>/dev/null | grep -iE "core/component/DataComponents" | head -4 || true
+          javap -cp "$J" net.minecraft.core.component.DataComponents 2>/dev/null | grep -iE "LEASH|CUSTOM_NAME|CUSTOM_DATA" | head -8
+          echo "== bat / entity types"
+          javap -cp "$J" net.minecraft.world.entity.EntityTypes 2>/dev/null | grep -iE "BAT|LEASH_KNOT" | head -6
+          javap -cp "$J" net.minecraft.world.entity.ambient.Bat 2>/dev/null | grep -iE "public" | head -10
+          echo "== Entity flags used on the endpoint mob (Invisible/NoAI/NoGravity/Silent)"
+          javap -cp "$J" net.minecraft.world.entity.Entity 2>/dev/null | grep -iE "setInvisible|setNoGravity|setSilent|setNoAi|setPos|getUUID|discard|remove" | head -20
+          echo "== items / lead / string"
+          javap -cp "$J" net.minecraft.world.item.Items 2>/dev/null | grep -iE "public static.*(LEAD|STRING)" | head -6
+          echo "== fences / block tags"
+          javap -cp "$J" net.minecraft.tags.BlockTags 2>/dev/null | grep -iE "FENCE" | head -6
+          echo "== commands / source"
+          javap -cp "$J" net.minecraft.commands.Commands 2>/dev/null | grep -iE "hasPermission|LEVEL_" | head -8
+          echo "== level / dim"
+          javap -cp "$J" net.minecraft.world.level.Level 2>/dev/null | grep -iE "dimension|getEntity" | head -8
+      - name: Upload jar
+        uses: actions/upload-artifact@v4
+        with:
+          name: ropes
+          path: build/libs/*.jar

@@ -1,0 +1,27 @@
+{
+  "schemaVersion": 1,
+  "id": "ropes",
+  "version": "${version}",
+  "name": "Ropes",
+  "description": "Server-side ropes: string a craftable Rope between two fence posts and vanilla's own leash renderer draws it at any angle — diagonal, vertical, chained across spans. Vanilla clients connect with no mods, no resource pack.",
+  "authors": [
+    "k33bz"
+  ],
+  "contact": {
+    "sources": "https://github.com/k33bz/ropes"
+  },
+  "license": "MIT",
+  "environment": "server",
+  "entrypoints": {
+    "main": [
+      "com.k33bz.ropes.Ropes"
+    ]
+  },
+  "mixins": [],
+  "depends": {
+    "fabricloader": ">=0.19.3",
+    "minecraft": "~26.2",
+    "java": ">=25",
+    "fabric-api": "*"
+  }
+}
