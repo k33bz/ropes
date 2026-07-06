@@ -101,6 +101,35 @@ public class RopesConfig {
      */
     public boolean climbResetFallWhileTouching = true;
 
+    // --- climb-session logging (v0.3.0) ---
+    /**
+     * Emit one NDJSON line per completed climb session to {@link #climbLogDir}
+     * ({@code ropes-climbs-YYYY-MM-DD.ndjson}), so the mc.kast.ro stats site can build climbing
+     * leaderboards. Default true. When false, no climb writer is started (climbing itself is
+     * unaffected).
+     */
+    public boolean climbLog = true;
+
+    /**
+     * Directory (relative to the run/game dir, or absolute) for the daily climb NDJSON files.
+     * Default {@code "config/ropes_logs"}.
+     */
+    public String climbLogDir = "config/ropes_logs";
+
+    /**
+     * A climb session ends after this many consecutive ticks with NO climb contact (and no pending
+     * release-fall). ~10 ticks (0.5s) tolerates a momentary slip off a rope without splitting one
+     * climb into two sessions. Default 10.
+     */
+    public int climbSessionGraceTicks = 10;
+
+    /**
+     * Server-tick interval between climb-log flusher drains. The game thread only enqueues finished
+     * sessions; every this-many ticks a scheduled drain writes them to the buffered writer and
+     * flushes. 20 ≈ once/second. A clean shutdown always drains fully. Default 20.
+     */
+    public int climbLogFlushIntervalTicks = 20;
+
     // ------------------------------------------------------------------
 
     private static final Gson GSON = new GsonBuilder().setPrettyPrinting().create();
@@ -123,6 +152,17 @@ public class RopesConfig {
         }
         // Clamp: >11 would let vanilla snap the leash and orphan the segment.
         cfg.maxSpanBlocks = RopeMath.clampMaxSpan(cfg.maxSpanBlocks);
+        // Tolerate legacy/partial files: an absent field deserializes to its Java default, but a
+        // blank/negative value that WOULD break the writer is repaired to a safe default here.
+        if (cfg.climbLogDir == null || cfg.climbLogDir.isBlank()) {
+            cfg.climbLogDir = "config/ropes_logs";
+        }
+        if (cfg.climbSessionGraceTicks < 1) {
+            cfg.climbSessionGraceTicks = 1;
+        }
+        if (cfg.climbLogFlushIntervalTicks < 1) {
+            cfg.climbLogFlushIntervalTicks = 1;
+        }
         cfg.save(); // write back so new knobs appear in the file
         return cfg;
     }

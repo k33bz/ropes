@@ -36,13 +36,26 @@ public class Ropes implements ModInitializer {
     /** Loaded once at init. */
     public static RopesConfig CONFIG;
 
+    /** The append-only climb-session NDJSON writer; null when climb logging is disabled. */
+    public static ClimbLogWriter CLIMB_WRITER;
+
     private int sweepCounter = 0;
+    private int climbFlushCounter = 0;
 
     @Override
     public void onInitialize() {
         CONFIG = RopesConfig.load();
         RopeStore.store(); // load early so a corrupt store complains at boot
         RopeStore.save();  // ...and materialize it so external tools can rely on the file
+
+        var loaderEarly = net.fabricmc.loader.api.FabricLoader.getInstance();
+        if (CONFIG.climbEnabled && CONFIG.climbLog) {
+            CLIMB_WRITER = new ClimbLogWriter(resolveClimbLogDir(loaderEarly),
+                    java.time.ZoneId.systemDefault());
+        } else {
+            LOGGER.info("[ropes] climb-session logging disabled (climbEnabled={}, climbLog={})",
+                    CONFIG.climbEnabled, CONFIG.climbLog);
+        }
 
         RopeCommands.register();
         registerUse();
@@ -51,6 +64,7 @@ public class Ropes implements ModInitializer {
         registerVerifyOnLoad();
         registerTick();
         registerDisconnect();
+        registerClimbLogShutdown();
 
         var loader = net.fabricmc.loader.api.FabricLoader.getInstance();
         String version = loader.getModContainer(MOD_ID)
@@ -164,7 +178,14 @@ public class Ropes implements ModInitializer {
     private void registerTick() {
         ServerTickEvents.END_SERVER_TICK.register(server -> {
             // Climbing runs every tick (status-effect driven; cheap registry query, no entity scan).
+            // This also accumulates + ends climb sessions, enqueueing finished ones on CLIMB_WRITER.
             RopeClimb.tick(server);
+
+            // Drain finished climb sessions to disk off the game thread's buffer, once per interval.
+            if (CLIMB_WRITER != null && ++climbFlushCounter >= CONFIG.climbLogFlushIntervalTicks) {
+                climbFlushCounter = 0;
+                CLIMB_WRITER.drain();
+            }
 
             if (CONFIG.verifyIntervalTicks <= 0) {
                 return;
@@ -183,5 +204,20 @@ public class Ropes implements ModInitializer {
     private void registerDisconnect() {
         ServerPlayConnectionEvents.DISCONNECT.register((handler, server) ->
                 Roping.clearPending(handler.player.getUUID()));
+    }
+
+    /** On clean shutdown, drain + flush + close the climb writer so nothing buffered is lost. */
+    private void registerClimbLogShutdown() {
+        ServerLifecycleEvents.SERVER_STOPPING.register(server -> {
+            if (CLIMB_WRITER != null) {
+                CLIMB_WRITER.shutdown();
+            }
+        });
+    }
+
+    /** Resolve the configured climb-log dir relative to the run/game dir (or honor an absolute path). */
+    private static java.nio.file.Path resolveClimbLogDir(net.fabricmc.loader.api.FabricLoader loader) {
+        java.nio.file.Path p = java.nio.file.Paths.get(CONFIG.climbLogDir);
+        return p.isAbsolute() ? p : loader.getGameDir().resolve(CONFIG.climbLogDir);
     }
 }

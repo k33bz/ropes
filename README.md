@@ -123,7 +123,10 @@ Knobs live in a separate **`config/ropes.json`**:
   "climbEnabled": true,       // rope climbing (see Climbing section for the rest)
   "climbMinAngleDeg": 75.0, "climbReach": 0.6, "climbLookDeg": 30.0,
   "climbFloorRate": 0.4, "climbVerticalRate": 0.9, "climbMaxRate": 1.8,
-  "climbResetFallWhileTouching": true
+  "climbResetFallWhileTouching": true,
+  "climbLog": true,                        // emit per-session NDJSON (v0.3.0)
+  "climbLogDir": "config/ropes_logs",      // daily ropes-climbs-YYYY-MM-DD.ndjson
+  "climbSessionGraceTicks": 10, "climbLogFlushIntervalTicks": 20
 }
 ```
 
@@ -194,7 +197,11 @@ contact point deals normal damage.
   "climbFloorRate": 0.4,         // curve floor at the gate (see rate note)
   "climbVerticalRate": 0.9,      // curve mid at vertical (config)
   "climbMaxRate": 1.8,           // hard cap (< ladder 2.35)
-  "climbResetFallWhileTouching": true
+  "climbResetFallWhileTouching": true,
+  "climbLog": true,                       // per-session climb log (v0.3.0; see below)
+  "climbLogDir": "config/ropes_logs",     // daily NDJSON dir
+  "climbSessionGraceTicks": 10,           // end a session after this many contact-free ticks
+  "climbLogFlushIntervalTicks": 20        // drain the log buffer to disk every N ticks
 }
 ```
 
@@ -218,6 +225,39 @@ entity-scanning: `geometryOf` (slope / `pitch()` / `isNearVertical`), `distanceT
 point-to-segment), and `nearestClimbable`. The climb detector runs entirely off these stored
 endpoints. Endpoint mobs are also **no-collision** (`collisionRule=never` team) and **no-physics**,
 so a climbing player at an endpoint can't shove the anchor and stretch/snap the rope.
+
+## Climb-session log (v0.3.0)
+
+When `climbLog` is on, each completed climb **session** is appended as one NDJSON line to
+**`config/ropes_logs/ropes-climbs-YYYY-MM-DD.ndjson`** (daily rollover), so the mc.kast.ro stats
+site can build climbing leaderboards. This uses the same buffered-append discipline as grieflog: the
+game thread only serializes + enqueues, and a tick-driven drain (`climbLogFlushIntervalTicks`, default
+20 ≈ 1 s) appends + flushes; a clean shutdown (`SERVER_STOPPING`) drains fully.
+
+A **session** runs from the first rope-climb **contact** to session **end** — any of: sneak-release
+(then the landing tick captures the fall), no climb contact for `climbSessionGraceTicks` (default 10)
+ticks, death, dimension change, or disconnect. Zero-movement sessions are skipped.
+
+Each line:
+
+```json
+{"t":1751818800000,"player":"k33bz","uuid":"11111111-2222-3333-4444-555555555555","up":24.4,"down":6,"peak_climb":18.3,"release_fall":9.5,"dim":"minecraft:overworld"}
+```
+
+| Field | Meaning |
+|---|---|
+| `t` | epoch millis at session end |
+| `player` / `uuid` | name + UUID (uuid included for offline-mode robustness) |
+| `up` | total blocks ascended (Σ positive Δy while climbing) |
+| `down` | total blocks descended (Σ \|negative Δy\| on the rope / slow-falling) |
+| `peak_climb` | **longest continuous ascent run** — a positive-Δy counter that resets on any descent or pause, max tracked (≠ total `up`) |
+| `release_fall` | fall distance actually fallen **after a sneak-release** until landing (0 if left normally / landed on the rope path / on water) |
+| `dim` | dimension id |
+
+Numbers are compact, locale-independent decimals (`12.5`, not `12.50000` or `12,5`). The accumulator
+and serializer are pure logic, unit-tested red-proven (`ClimbSessionTest`, `ClimbLogTest`) — the
+peak-run reset-on-descent behavior especially. Live climb validation is a **manual playtest** item
+(the climb is effect-driven, which mineflayer-through-ViaProxy does not reproduce; see Open items).
 
 ## The spike
 
