@@ -56,7 +56,7 @@ public final class RopeStore {
         }
 
         public boolean touches(String dim, int x, int y, int z) {
-            return this.dim.equals(dim)
+            return java.util.Objects.equals(this.dim, dim)
                     && ((fenceA[0] == x && fenceA[1] == y && fenceA[2] == z)
                     || (fenceB[0] == x && fenceB[1] == y && fenceB[2] == z));
         }
@@ -140,7 +140,7 @@ public final class RopeStore {
     /** Whether any segment (other than {@code except}) still anchors a knot at this fence. */
     public static boolean anotherRopeUses(String dim, int x, int y, int z, Segment except) {
         for (Segment s : store().segments) {
-            if (s != except && s.dim.equals(dim)
+            if (s != except && java.util.Objects.equals(s.dim, dim)
                     && s.fenceA[0] == x && s.fenceA[1] == y && s.fenceA[2] == z) {
                 return true;
             }
