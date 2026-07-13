@@ -238,7 +238,7 @@ public final class RopeClimb {
         // allows. Angle still scales the rate up toward the cap (steeper = faster).
         double deliverableFloor = ClimbRate.effectiveFloor(cfg.climbFloorRate);
         double target = ClimbRate.targetRate(angleDeg, cfg.climbMinAngleDeg,
-                deliverableFloor, cfg.climbMaxRate, cfg.climbMaxRate);
+                deliverableFloor, cfg.climbVerticalRate, cfg.climbMaxRate);
         int amp = ClimbRate.amplitudeThisTick(tickCounter, target);
         // Never descend while trying to climb: clear any slow-fall, then levitate this tick.
         player.removeEffect(MobEffects.SLOW_FALLING);
@@ -260,7 +260,7 @@ public final class RopeClimb {
 
     /** Remove Levitation only if WE applied it this session (transition-out at a ledge). */
     private static void removeOurLevitation(ServerPlayer player, UUID id) {
-        if (WAS_LEVITATING.remove(id) || player.hasEffect(MobEffects.LEVITATION)) {
+        if (WAS_LEVITATING.remove(id)) {
             player.removeEffect(MobEffects.LEVITATION);
         }
     }
