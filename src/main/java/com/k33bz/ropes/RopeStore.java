@@ -94,7 +94,17 @@ public final class RopeStore {
 
     public static void save() {
         try {
-            Files.writeString(path(), GSON.toJson(store()));
+            // Atomic: write a temp file then rename, so a crash mid-write cannot truncate the store
+            // (the all-or-nothing parse on load would otherwise silently reset it to empty).
+            Path p = path();
+            Path tmp = p.resolveSibling(p.getFileName().toString() + ".tmp");
+            Files.writeString(tmp, GSON.toJson(store()));
+            try {
+                Files.move(tmp, p, java.nio.file.StandardCopyOption.ATOMIC_MOVE,
+                        java.nio.file.StandardCopyOption.REPLACE_EXISTING);
+            } catch (java.nio.file.AtomicMoveNotSupportedException amns) {
+                Files.move(tmp, p, java.nio.file.StandardCopyOption.REPLACE_EXISTING);
+            }
         } catch (IOException e) {
             Ropes.LOGGER.warn("[ropes] could not save rope store", e);
         }
