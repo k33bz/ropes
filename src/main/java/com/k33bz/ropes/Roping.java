@@ -107,6 +107,11 @@ public final class Roping {
      * as the spike demands). Persists the segment on success (store saves on every mutation).
      * Validates both blocks are fences and the span is within {@link RopesConfig#maxSpanBlocks}.
      */
+    /** True if the stored {@code [x,y,z]} equals the given block position. */
+    private static boolean samePos(int[] p, BlockPos b) {
+        return p != null && p.length == 3 && p[0] == b.getX() && p[1] == b.getY() && p[2] == b.getZ();
+    }
+
     public static Result tie(ServerLevel level, BlockPos fenceA, BlockPos fenceB, ServerPlayer player) {
         if (!isFence(level, fenceA) || !isFence(level, fenceB)) {
             String m = "Both ends must be fence posts.";
@@ -119,6 +124,24 @@ public final class Roping {
             String m = String.format(Locale.ROOT,
                     "Too far — %.1f blocks (max %d). Chain from a knot for longer runs.",
                     span, Ropes.CONFIG.maxSpanBlocks);
+            feedback(player, m);
+            return new Result(false, m);
+        }
+        // Refuse duplicate ties (same two posts, either orientation) and enforce the global segment
+        // cap BEFORE spawning any entity — bounds the permission-0 /rope tie resource-exhaustion.
+        String dimStr = level.dimension().identifier().toString();
+        for (RopeStore.Segment s : RopeStore.segments()) {
+            if (s.dim.equals(dimStr)
+                    && ((samePos(s.fenceA, fenceA) && samePos(s.fenceB, fenceB))
+                            || (samePos(s.fenceA, fenceB) && samePos(s.fenceB, fenceA)))) {
+                String m = "There's already a rope between those posts.";
+                feedback(player, m);
+                return new Result(false, m);
+            }
+        }
+        if (RopeStore.segments().size() >= Ropes.CONFIG.maxSegments) {
+            String m = String.format(Locale.ROOT,
+                    "The server rope limit (%d) is reached.", Ropes.CONFIG.maxSegments);
             feedback(player, m);
             return new Result(false, m);
         }
@@ -167,6 +190,16 @@ public final class Roping {
         }
         if (best == null) {
             String m = "No rope here to cut.";
+            feedback(player, m);
+            return new Result(false, m);
+        }
+        // Only the owner (or a creative-mode admin / non-player command source) may cut a rope —
+        // stops a player severing someone else's ropes at range via /rope cut. isCreative() is the
+        // same privilege proxy the mod already uses for anchor renaming (AnchorDialog.canRename).
+        if (player != null && best.owner != null
+                && !best.owner.equals(player.getUUID().toString())
+                && !player.isCreative()) {
+            String m = "That rope isn't yours to cut.";
             feedback(player, m);
             return new Result(false, m);
         }

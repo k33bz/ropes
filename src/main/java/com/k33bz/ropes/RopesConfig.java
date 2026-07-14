@@ -26,6 +26,13 @@ public class RopesConfig {
     public int maxSpanBlocks = 11;
 
     /**
+     * Global cap on how many rope segments the store will hold. A permission-0, no-item-cost
+     * {@code /rope tie} can otherwise be spammed into unbounded persistent endpoint entities and an
+     * ever-growing store; ties beyond this cap (and exact-duplicate ties) are refused.
+     */
+    public int maxSegments = 2000;
+
+    /**
      * Whether breaking either fence post of a segment drops a Rope back. On by default so the
      * material is recoverable; set false for a "ropes are consumed permanently" server.
      */
