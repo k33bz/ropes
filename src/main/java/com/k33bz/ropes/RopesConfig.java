@@ -44,6 +44,13 @@ public class RopesConfig {
      */
     public int verifyIntervalTicks = 200;
 
+    /**
+     * How close (blocks, eye to block centre) a survival player must be to BOTH posts to use
+     * {@code /rope tie}; the command also costs one Rope from their inventory, exactly like the
+     * right-click path. Ops (permission 2), creative players and the console are exempt. Default 6.
+     */
+    public double tieReachBlocks = 6.0;
+
     // --- decorative knot caps ---
     /**
      * Spawn small decorative {@code item_display} "knot" caps at every tie-point of a segment, so
@@ -145,38 +152,84 @@ public class RopesConfig {
         return FabricLoader.getInstance().getConfigDir().resolve("ropes.json");
     }
 
+    // Ranges sanitize() clamps to. Out-of-range or NaN values used to reach the tick unchecked.
+    static final int MAX_SEGMENTS_CAP = 100_000;
+    static final int TICKS_CAP = 72_000;            // one in-game hour of ticks at most
+    static final double KNOT_SCALE_MIN = 0.05;
+    static final double KNOT_SCALE_MAX = 4.0;
+    static final double REACH_MIN = 0.1;
+    static final double CLIMB_REACH_MAX = 3.0;
+    static final double TIE_REACH_MAX = 16.0;
+    /** Below the vanilla ladder ascend (~2.35 b/s), as ClimbRateTest asserts for the default. */
+    static final double RATE_MAX = 2.3;
+
     public static RopesConfig load() {
         RopesConfig cfg = null;
-        try {
-            if (Files.exists(path())) {
-                cfg = GSON.fromJson(Files.readString(path()), RopesConfig.class);
+        boolean unreadable = false;
+        Path p = path();
+        if (Files.exists(p)) {
+            try {
+                cfg = GSON.fromJson(Files.readString(p), RopesConfig.class);
+            } catch (Exception e) {
+                // Keep the broken file for the admin instead of saving defaults over their settings
+                Path backup = RopeFiles.backUpCorrupt(p, System.currentTimeMillis());
+                Ropes.LOGGER.error("[ropes] could not read config {}; using defaults (the file is kept as {})",
+                        p, backup, e);
+                unreadable = true;
             }
-        } catch (Exception e) {
-            Ropes.LOGGER.warn("[ropes] could not read config, using defaults", e);
         }
         if (cfg == null) {
             cfg = new RopesConfig();
         }
-        // Clamp: >11 would let vanilla snap the leash and orphan the segment.
-        cfg.maxSpanBlocks = RopeMath.clampMaxSpan(cfg.maxSpanBlocks);
-        // Tolerate legacy/partial files: an absent field deserializes to its Java default, but a
-        // blank/negative value that WOULD break the writer is repaired to a safe default here.
-        if (cfg.climbLogDir == null || cfg.climbLogDir.isBlank()) {
-            cfg.climbLogDir = "config/ropes_logs";
+        cfg.sanitize();
+        if (!unreadable) {
+            cfg.save(); // write back so new knobs appear in the file (never over an unreadable one)
         }
-        if (cfg.climbSessionGraceTicks < 1) {
-            cfg.climbSessionGraceTicks = 1;
-        }
-        if (cfg.climbLogFlushIntervalTicks < 1) {
-            cfg.climbLogFlushIntervalTicks = 1;
-        }
-        cfg.save(); // write back so new knobs appear in the file
         return cfg;
+    }
+
+    /**
+     * Bring every knob into a range the tick code can run on. A missing key keeps its default; a
+     * NaN falls back to the default; anything else is clamped.
+     */
+    public void sanitize() {
+        RopesConfig d = new RopesConfig();
+        // >11 would let vanilla snap the leash and orphan the segment.
+        maxSpanBlocks = RopeMath.clampMaxSpan(maxSpanBlocks);
+        maxSegments = clamp(maxSegments, 0, MAX_SEGMENTS_CAP);
+        verifyIntervalTicks = clamp(verifyIntervalTicks, 0, TICKS_CAP); // 0 = periodic sweep off
+        tieReachBlocks = clamp(tieReachBlocks, 1.0, TIE_REACH_MAX, d.tieReachBlocks);
+        knotScale = clamp(knotScale, KNOT_SCALE_MIN, KNOT_SCALE_MAX, d.knotScale);
+        String tex = RopeChecks.cleanTexture(knotHeadTexture);
+        if (knotHeadTexture != null && !knotHeadTexture.isBlank() && tex.isEmpty()) {
+            Ropes.LOGGER.warn("[ropes] knotHeadTexture is not a base64 texture value; using the lead knot");
+        }
+        knotHeadTexture = tex;
+        climbMinAngleDeg = clamp(climbMinAngleDeg, 0.0, 90.0, d.climbMinAngleDeg);
+        climbReach = clamp(climbReach, REACH_MIN, CLIMB_REACH_MAX, d.climbReach);
+        climbLookDeg = clamp(climbLookDeg, 0.0, 90.0, d.climbLookDeg);
+        climbFloorRate = clamp(climbFloorRate, 0.0, RATE_MAX, d.climbFloorRate);
+        climbVerticalRate = clamp(climbVerticalRate, 0.0, RATE_MAX, d.climbVerticalRate);
+        climbMaxRate = clamp(climbMaxRate, 0.0, RATE_MAX, d.climbMaxRate);
+        // Tolerate legacy/partial files: a blank dir would break the writer.
+        if (climbLogDir == null || climbLogDir.isBlank()) {
+            climbLogDir = d.climbLogDir;
+        }
+        climbSessionGraceTicks = clamp(climbSessionGraceTicks, 1, TICKS_CAP);
+        climbLogFlushIntervalTicks = clamp(climbLogFlushIntervalTicks, 1, TICKS_CAP);
+    }
+
+    private static int clamp(int v, int min, int max) {
+        return Math.max(min, Math.min(max, v));
+    }
+
+    private static double clamp(double v, double min, double max, double fallback) {
+        return Double.isNaN(v) ? fallback : Math.max(min, Math.min(max, v));
     }
 
     public void save() {
         try {
-            Files.writeString(path(), GSON.toJson(this));
+            RopeFiles.writeAtomically(path(), GSON.toJson(this));
         } catch (IOException e) {
             Ropes.LOGGER.warn("[ropes] could not save config", e);
         }

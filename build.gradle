@@ -12,11 +12,11 @@ base {
 }
 
 loom {
-    // 26.2 branch: isolated run dir — never let a 26.2 server touch (and upgrade!) a
-    // 26.1.2 dev world that lives in run/.
+    // One run dir per Minecraft line (dev_run_dir in gradle.properties): never let a newer server
+    // touch (and irreversibly upgrade) an older line's dev world.
     runs {
         server {
-            runDir "run262"
+            runDir project.dev_run_dir
         }
     }
 }
@@ -33,7 +33,7 @@ dependencies {
     // No sgui / Polymer: ropes is pure-vanilla — the Rope item is a marked vanilla lead,
     // the rope itself is rendered by vanilla's own leash pass. Nothing client-facing to add.
 
-    // Pure-logic unit tests (RopeMath span checks) — no game runtime required.
+    // Pure-logic unit tests (span, climb, config, store-file and rule checks) — no game runtime required.
     testImplementation platform('org.junit:junit-bom:5.11.3')
     testImplementation 'org.junit.jupiter:junit-jupiter'
     testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
@@ -45,9 +45,11 @@ test {
 
 processResources {
     inputs.property "version", project.version
+    inputs.property "minecraft_version", project.minecraft_version
     filteringCharset "UTF-8"
     filesMatching("fabric.mod.json") {
-        expand "version": project.version
+        // minecraft_version comes from gradle.properties, so each line's jar declares its own game
+        expand "version": project.version, "minecraft_version": project.minecraft_version
     }
 }
 

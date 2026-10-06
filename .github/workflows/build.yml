@@ -1,20 +1,29 @@
 name: build
 
+# One pipeline per supported Minecraft line: main = newest (26.3), 26.x branches = backports.
 on:
   push:
     branches: [main, '26.*']
   pull_request:
+  workflow_dispatch: {}
 
 jobs:
   build:
     runs-on: ubuntu-latest
+    permissions:
+      contents: write   # only used to push README badge data to the `badges` branch (release lines)
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-java@v4
+      - uses: actions/checkout@v7
+      - uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: 25
           cache: gradle
+      - name: Minecraft version
+        run: |
+          MC=$(grep -E '^minecraft_version=' gradle.properties | cut -d= -f2)
+          echo "MC_VERSION=$MC" >> "$GITHUB_ENV"
+          echo "### ropes on Minecraft $MC (\`$GITHUB_REF_NAME\`)" >> "$GITHUB_STEP_SUMMARY"
       - name: Build + tests
         run: ./gradlew build
       - name: Diagnose mappings (only on failure)
@@ -42,10 +51,61 @@ jobs:
           javap -cp "$J" net.minecraft.tags.BlockTags 2>/dev/null | grep -iE "FENCE" | head -6
           echo "== commands / source"
           javap -cp "$J" net.minecraft.commands.Commands 2>/dev/null | grep -iE "hasPermission|LEVEL_" | head -8
+          echo "== 0.3.1: entity-load gate, collision shape, entity events"
+          javap -cp "$J" net.minecraft.server.level.ServerLevel 2>/dev/null | grep -iE "EntitiesLoaded|EntityTicking|areEntities" | head -6
+          javap -cp "$J" net.minecraft.world.level.ChunkPos 2>/dev/null | grep -iE "public net|ChunkPos\(" | head -6
+          javap -cp "$J" net.minecraft.world.level.block.state.BlockBehaviour\$BlockStateBase 2>/dev/null | grep -iE "getCollisionShape|blocksMotion" | head -4
+          javap -cp "$J" net.minecraft.world.entity.Entity 2>/dev/null | grep -iE "Invulnerable|entityTags|getEyePosition" | head -6
+          javap -cp "$J" net.minecraft.world.entity.player.Inventory 2>/dev/null | grep -iE "getContainerSize|getItem|setChanged" | head -4
           echo "== level / dim"
           javap -cp "$J" net.minecraft.world.level.Level 2>/dev/null | grep -iE "dimension|getEntity" | head -8
-      - name: Upload jar
-        uses: actions/upload-artifact@v4
+      - name: Test summary
+        if: always()
+        run: |
+          python3 - <<'PY' >> "$GITHUB_STEP_SUMMARY"
+          import glob, re, sys
+          t = f = e = s = 0
+          for p in glob.glob('build/test-results/test/*.xml'):
+              head = open(p, encoding='utf-8').read(4096)
+              m = re.search(r'tests="(\d+)" skipped="(\d+)" failures="(\d+)" errors="(\d+)"', head)
+              t += int(m[1]); s += int(m[2]); f += int(m[3]); e += int(m[4])
+          print(f"Unit tests: **{t}** run, {f} failed, {e} errors, {s} skipped")
+          if t == 0:
+              print("::error::no unit tests ran", file=sys.stderr)
+              sys.exit(1)
+          PY
+      # Boot a real Fabric server twice (newest release of this line, newest fabric-api) and drive
+      # it through the console. Writes build/server-test/versions.json for the badges below.
+      - name: Server test (real Fabric server)
+        run: python3 scripts/server_test.py
+      - name: Upload server-test log
+        if: always()
+        uses: actions/upload-artifact@v7
         with:
-          name: ropes
+          name: server-test-log-${{ env.MC_VERSION }}
+          path: build/server-test/console.log
+          if-no-files-found: ignore
+      # README badges per release line (scripts/publish_badges.py -> orphan `badges` branch).
+      # Pushes to a release line only: a PR or feature branch must never overwrite what they report.
+      - name: Publish version badges
+        if: always() && github.event_name == 'push' && (github.ref_name == 'main' || startsWith(github.ref_name, '26.')) && hashFiles('build/server-test/versions.json') != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+        run: |
+          python3 scripts/publish_badges.py --branch "$GITHUB_REF_NAME" --out /tmp/badges
+          bash scripts/commit_badges.sh /tmp/badges "$GITHUB_REF_NAME @ ${GITHUB_SHA::7}" || true
+      - name: Upload test reports
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: test-reports-${{ env.MC_VERSION }}
+          path: build/reports/tests/test
+          if-no-files-found: ignore
+      - name: Artifact slug
+        run: echo "ARTIFACT_SLUG=${GITHUB_REF_NAME//\//-}" >> "$GITHUB_ENV"
+      - name: Upload jar
+        uses: actions/upload-artifact@v7
+        with:
+          name: ropes-${{ env.MC_VERSION }}-${{ env.ARTIFACT_SLUG }}
           path: build/libs/*.jar

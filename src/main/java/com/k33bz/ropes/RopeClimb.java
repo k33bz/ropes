@@ -283,8 +283,10 @@ public final class RopeClimb {
     }
 
     private static boolean blocks(ServerLevel level, BlockPos pos) {
+        // Collision shape, not blocksMotion(): that method is gone in 26.3, and this reads the same
+        // on every Minecraft line.
         BlockState state = level.getBlockState(pos);
-        return state.blocksMotion();
+        return !state.getCollisionShape(level, pos).isEmpty();
     }
 
     // ------------------------------------------------------------ session end
