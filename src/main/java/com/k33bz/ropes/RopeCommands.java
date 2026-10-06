@@ -11,6 +11,7 @@ import net.minecraft.core.BlockPos;
 import net.minecraft.network.chat.Component;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
+import net.minecraft.world.phys.Vec3;
 
 import java.util.Locale;
 
@@ -23,14 +24,18 @@ import java.util.Locale;
  *
  * <ul>
  *   <li>{@code /rope tie <ax ay az> <bx by bz>} — string a segment A&rarr;B (validates span).</li>
- *   <li>{@code /rope cut <x y z>} — cut the rope nearest that block.</li>
- *   <li>{@code /rope give [count]} — give the caller Rope items (permission 0, self-serve).</li>
+ *   <li>{@code /rope cut <x y z>} — cut the rope nearest that block (your own ropes only).</li>
+ *   <li>{@code /rope give [count]} — give the caller Rope items (ops only, permission 2).</li>
  *   <li>{@code /rope list} — how many segments are stored (permission 0, read-only).</li>
  * </ul>
  *
- * <p>Permission: {@code tie}/{@code cut} are permission 0 per spec (accessibility) — the same
- * effect a player achieves with a Rope by hand, so no new power is granted. Servers wanting to
- * gate rope-building should restrict the command via their permission mod.</p>
+ * <p>Permission: {@code tie}/{@code cut} stay permission 0 (accessibility), and since 0.3.1 they
+ * grant nothing a player couldn't do by hand: a survival player's {@code /rope tie} needs both
+ * posts within {@link RopesConfig#tieReachBlocks} and pays one Rope from their inventory, like the
+ * right-click path. Before, it was free and worked at any distance, so anyone could string ropes
+ * through someone else's base and fill the server-wide segment cap. Ops, creative players and the
+ * console are exempt. {@code /rope give} handed out free Ropes (each a working lead) to anyone and
+ * is now op-only.</p>
  */
 public final class RopeCommands {
     private RopeCommands() {
@@ -47,6 +52,7 @@ public final class RopeCommands {
                                 .then(Commands.argument("near", BlockPosArgument.blockPos())
                                         .executes(RopeCommands::cut)))
                         .then(Commands.literal("give")
+                                .requires(Commands.<CommandSourceStack>hasPermission(Commands.LEVEL_GAMEMASTERS))
                                 .executes(ctx -> give(ctx, 1))
                                 .then(Commands.argument("count",
                                         com.mojang.brigadier.arguments.IntegerArgumentType.integer(1, 64))
@@ -66,7 +72,27 @@ public final class RopeCommands {
         BlockPos a = BlockPosArgument.getLoadedBlockPos(ctx, "fenceA");
         BlockPos b = BlockPosArgument.getLoadedBlockPos(ctx, "fenceB");
         ServerPlayer player = src.getEntity() instanceof ServerPlayer p ? p : null;
+        // Survival players play by the right-click rules: both posts in reach, one Rope paid
+        boolean exempt = player == null || player.isCreative()
+                || Commands.<CommandSourceStack>hasPermission(Commands.LEVEL_GAMEMASTERS).test(src);
+        if (!exempt) {
+            double reach = Ropes.CONFIG.tieReachBlocks;
+            Vec3 eye = player.getEyePosition();
+            if (!RopeChecks.withinReach(eye.x, eye.y, eye.z, a.getX(), a.getY(), a.getZ(), reach)
+                    || !RopeChecks.withinReach(eye.x, eye.y, eye.z, b.getX(), b.getY(), b.getZ(), reach)) {
+                src.sendFailure(Component.literal(String.format(Locale.ROOT,
+                        "Both posts must be within %.0f blocks of you.", reach)));
+                return 0;
+            }
+            if (!Roping.hasRope(player)) {
+                src.sendFailure(Component.literal("You need a Rope to tie with."));
+                return 0;
+            }
+        }
         Roping.Result r = Roping.tie(level, a, b, player);
+        if (r.ok() && !exempt) {
+            Roping.takeOneRope(player);
+        }
         if (r.ok()) {
             src.sendSuccess(() -> Component.literal(r.message()).withStyle(ChatFormatting.GREEN), false);
             return 1;

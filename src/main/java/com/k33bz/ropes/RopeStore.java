@@ -73,14 +73,32 @@ public final class RopeStore {
         return FabricLoader.getInstance().getConfigDir().resolve("ropes_store.json");
     }
 
+    /**
+     * True when this boot found the store unreadable and started empty (the original is kept as
+     * {@code ropes_store.json.corrupt-*}). The stray-endpoint cleanup stands down then: every bat
+     * would look untracked, and removing them would make restoring the backup pointless.
+     */
+    private static boolean recovered;
+
+    public static boolean recoveredFromCorruption() {
+        store();
+        return recovered;
+    }
+
     public static Store store() {
         if (store == null) {
-            try {
-                if (Files.exists(path())) {
-                    store = GSON.fromJson(Files.readString(path()), new TypeToken<Store>() { }.getType());
+            Path p = path();
+            if (Files.exists(p)) {
+                try {
+                    store = GSON.fromJson(Files.readString(p), new TypeToken<Store>() { }.getType());
+                } catch (Exception e) {
+                    // Never save over a store we couldn't read: keep it for the admin, then start empty
+                    Path backup = RopeFiles.backUpCorrupt(p, System.currentTimeMillis());
+                    Ropes.LOGGER.error("[ropes] could not read the rope store {}; kept it as {} and started"
+                            + " with no ropes. Repair that file and copy it back to restore them.", p, backup, e);
+                    store = null;
+                    recovered = true;
                 }
-            } catch (Exception e) {
-                Ropes.LOGGER.warn("[ropes] could not read rope store", e);
             }
             if (store == null) {
                 store = new Store();
@@ -88,23 +106,27 @@ public final class RopeStore {
             if (store.segments == null) {
                 store.segments = new ArrayList<>();
             }
+            dropMalformed(p);
         }
         return store;
     }
 
+    /** Remove entries the tick code can't run on (see {@link RopeChecks#wellFormed}), keeping a backup. */
+    private static void dropMalformed(Path p) {
+        int before = store.segments.size();
+        store.segments.removeIf(s -> s == null || !RopeChecks.wellFormed(s.dim, s.fenceA, s.fenceB));
+        int dropped = before - store.segments.size();
+        if (dropped > 0) {
+            Path backup = Files.exists(p) ? RopeFiles.backUpCorrupt(p, System.currentTimeMillis()) : null;
+            Ropes.LOGGER.warn("[ropes] dropped {} malformed rope segment(s) from the store (missing dimension or"
+                    + " posts); the original file is kept as {}", dropped, backup);
+        }
+    }
+
     public static void save() {
         try {
-            // Atomic: write a temp file then rename, so a crash mid-write cannot truncate the store
-            // (the all-or-nothing parse on load would otherwise silently reset it to empty).
-            Path p = path();
-            Path tmp = p.resolveSibling(p.getFileName().toString() + ".tmp");
-            Files.writeString(tmp, GSON.toJson(store()));
-            try {
-                Files.move(tmp, p, java.nio.file.StandardCopyOption.ATOMIC_MOVE,
-                        java.nio.file.StandardCopyOption.REPLACE_EXISTING);
-            } catch (java.nio.file.AtomicMoveNotSupportedException amns) {
-                Files.move(tmp, p, java.nio.file.StandardCopyOption.REPLACE_EXISTING);
-            }
+            // Atomic: write a temp file then rename, so a crash mid-write cannot truncate the store.
+            RopeFiles.writeAtomically(path(), GSON.toJson(store()));
         } catch (IOException e) {
             Ropes.LOGGER.warn("[ropes] could not save rope store", e);
         }
@@ -129,11 +151,36 @@ public final class RopeStore {
     /** The segment with the given endpoint UUID, or null. */
     public static Segment byEndpoint(String uuid) {
         for (Segment s : store().segments) {
-            if (uuid.equals(s.endpointUuid)) {
+            if (uuid != null && uuid.equals(s.endpointUuid)) {
                 return s;
             }
         }
         return null;
+    }
+
+    /** Whether this exact segment is still stored (identity: a cut segment is gone). */
+    public static boolean contains(Segment seg) {
+        for (Segment s : store().segments) {
+            if (s == seg) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /** Whether any stored segment has this endpoint UUID (the stray-endpoint cleanup asks this). */
+    public static boolean hasEndpoint(String uuid) {
+        return byEndpoint(uuid) != null;
+    }
+
+    /** Whether any stored segment owns knot caps tagged with this segment id. */
+    public static boolean hasSegId(String segId) {
+        for (Segment s : store().segments) {
+            if (RopeKnots.segId(s).equals(segId)) {
+                return true;
+            }
+        }
+        return false;
     }
 
     /** Every segment that has an endpoint at the given fence block (A or B). */
