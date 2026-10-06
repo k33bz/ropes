@@ -4,7 +4,13 @@ Craftable **ropes strung between fence posts at any angle** for Fabric dedicated
 Entirely **server-side** — vanilla clients connect with no mods and no resource pack. The rope
 you see is drawn by **vanilla's own leash renderer**, so there is nothing to install client-side.
 
-**For Minecraft 26.2** (branch `main`) and **26.1.x** (branch `26.1`) · Fabric Loader ≥ 0.19.3 · Java 25
+**For Minecraft 26.3** (branch `main`), **26.2** (branch `26.2`) and **26.1.x** (branch `26.1`) · Fabric Loader ≥ 0.19.5 · Java 25
+
+| Branch | Minecraft | Status |
+|---|---|---|
+| `main` | 26.3 | [![build main](https://github.com/k33bz/ropes/actions/workflows/build.yml/badge.svg?branch=main)](https://github.com/k33bz/ropes/actions/workflows/build.yml?query=branch%3Amain) ![mod main](https://img.shields.io/endpoint?url=https%3A%2F%2Fraw.githubusercontent.com%2Fk33bz%2Fropes%2Fbadges%2Fmain%2Fmod.json) ![minecraft main](https://img.shields.io/endpoint?url=https%3A%2F%2Fraw.githubusercontent.com%2Fk33bz%2Fropes%2Fbadges%2Fmain%2Fminecraft.json) ![loader main](https://img.shields.io/endpoint?url=https%3A%2F%2Fraw.githubusercontent.com%2Fk33bz%2Fropes%2Fbadges%2Fmain%2Floader.json) ![fabric-api main](https://img.shields.io/endpoint?url=https%3A%2F%2Fraw.githubusercontent.com%2Fk33bz%2Fropes%2Fbadges%2Fmain%2Ffabric-api.json) ![server-test main](https://img.shields.io/endpoint?url=https%3A%2F%2Fraw.githubusercontent.com%2Fk33bz%2Fropes%2Fbadges%2Fmain%2Fserver-test.json) |
+| `26.2` | 26.2 | [![build 26.2](https://github.com/k33bz/ropes/actions/workflows/build.yml/badge.svg?branch=26.2)](https://github.com/k33bz/ropes/actions/workflows/build.yml?query=branch%3A26.2) ![mod 26.2](https://img.shields.io/endpoint?url=https%3A%2F%2Fraw.githubusercontent.com%2Fk33bz%2Fropes%2Fbadges%2F26.2%2Fmod.json) ![minecraft 26.2](https://img.shields.io/endpoint?url=https%3A%2F%2Fraw.githubusercontent.com%2Fk33bz%2Fropes%2Fbadges%2F26.2%2Fminecraft.json) ![loader 26.2](https://img.shields.io/endpoint?url=https%3A%2F%2Fraw.githubusercontent.com%2Fk33bz%2Fropes%2Fbadges%2F26.2%2Floader.json) ![fabric-api 26.2](https://img.shields.io/endpoint?url=https%3A%2F%2Fraw.githubusercontent.com%2Fk33bz%2Fropes%2Fbadges%2F26.2%2Ffabric-api.json) ![server-test 26.2](https://img.shields.io/endpoint?url=https%3A%2F%2Fraw.githubusercontent.com%2Fk33bz%2Fropes%2Fbadges%2F26.2%2Fserver-test.json) |
+| `26.1` | 26.1.x | [![build 26.1](https://github.com/k33bz/ropes/actions/workflows/build.yml/badge.svg?branch=26.1)](https://github.com/k33bz/ropes/actions/workflows/build.yml?query=branch%3A26.1) ![mod 26.1](https://img.shields.io/endpoint?url=https%3A%2F%2Fraw.githubusercontent.com%2Fk33bz%2Fropes%2Fbadges%2F26.1%2Fmod.json) ![minecraft 26.1](https://img.shields.io/endpoint?url=https%3A%2F%2Fraw.githubusercontent.com%2Fk33bz%2Fropes%2Fbadges%2F26.1%2Fminecraft.json) ![loader 26.1](https://img.shields.io/endpoint?url=https%3A%2F%2Fraw.githubusercontent.com%2Fk33bz%2Fropes%2Fbadges%2F26.1%2Floader.json) ![fabric-api 26.1](https://img.shields.io/endpoint?url=https%3A%2F%2Fraw.githubusercontent.com%2Fk33bz%2Fropes%2Fbadges%2F26.1%2Ffabric-api.json) ![server-test 26.1](https://img.shields.io/endpoint?url=https%3A%2F%2Fraw.githubusercontent.com%2Fk33bz%2Fropes%2Fbadges%2F26.1%2Fserver-test.json) |
 
 ---
 
@@ -16,8 +22,8 @@ working pattern (proven by the [spike](#the-spike)) is:
 
 > a fence **leash-knot** (the holder) ↔ an **invisible, pinned, leashable mob** (the moving end).
 
-Ropes spawns an invisible bat (`Invisible / NoGravity / Silent / NoAI / PersistenceRequired /
-Invulnerable`) at one fence and leashes it to the other fence's knot. Vanilla then renders the
+Ropes spawns an invisible bat (`Invisible / NoGravity / Silent / NoAI / PersistenceRequired`,
+and undamageable) at one fence and leashes it to the other fence's knot. Vanilla then renders the
 leash — the **rope** — between them, at **any angle** (diagonal and vertical both confirmed
 server-side).
 
@@ -51,7 +57,11 @@ A **Rope** is a **lead marked with a data component** (`custom_data {ropes_item:
 Lead + String  →  2 × Rope   (shapeless)
 ```
 
-Or grab some with `/rope give [count]`.
+Ops can also hand them out with `/rope give [count]`.
+
+A Rope is only a rope: it can't leash a mob (otherwise Lead + String → 2 Ropes would double your
+leads). The rope's own pieces, the invisible endpoint and the knot it hangs from, can't be hit or
+interacted with; cut a rope with shears on its fence.
 
 ### String a rope by hand
 
@@ -77,24 +87,31 @@ knot caps, and any orphaned knot (`PlayerBlockBreakEvents`).
 
 Sneak/right-click interactions can't be driven headlessly, so every interaction has a command
 twin that runs the **same** logic (span validation, chaining, retry-until-confirmed attach,
-save-on-every-mutation). Permission 0 by default (a command grants no power a Rope-in-hand
-doesn't — gate via your permission mod if you want to restrict rope-building):
+save-on-every-mutation). The commands grant nothing a Rope in hand doesn't:
 
-| Command | Effect |
-|---|---|
-| `/rope tie <ax ay az> <bx by bz>` | String a segment A→B (validates the 11-block span). |
-| `/rope cut <x y z>` | Cut the rope nearest that block. |
-| `/rope give [count]` | Give yourself Rope items. |
-| `/rope list` | How many segments are stored. |
+| Command | Who | Effect |
+|---|---|---|
+| `/rope tie <ax ay az> <bx by bz>` | everyone | String a segment A→B (validates the 11-block span). A survival player needs both posts within `tieReachBlocks` (6) and pays one Rope from their inventory, like a right-click. Ops, creative players and the console are exempt. |
+| `/rope cut <x y z>` | everyone | Cut the rope nearest that block (only your own ropes, unless creative or the console). |
+| `/rope give [count]` | ops (permission 2) | Give yourself Rope items. |
+| `/rope list` | everyone | How many segments are stored. |
 
 ---
 
 ## Persistence & the JSON schema
 
-Segments are stored in **`config/ropes_store.json`** (gson), **saved on every mutation** (add /
-remove) — never deferred. On server start and on chunk load, every segment's leash is re-verified
-and **re-linked** if an endpoint entity was lost (the spike showed reload survives; this is
-defensive).
+Segments are stored in **`config/ropes_store.json`** (gson), **saved atomically on every
+mutation** (add / remove) — never deferred. On server start and on chunk load, every segment's
+leash is re-verified and **re-linked** if an endpoint entity was lost (the spike showed reload
+survives; this is defensive). The check waits until the chunk's entities have actually loaded,
+and rope entities that load with no stored rope behind them are removed.
+
+If the store can't be read, it is **never overwritten**: it is kept as
+`ropes_store.json.corrupt-<millis>` and Ropes starts with no ropes (and leaves every existing rope
+entity alone). Repair the file and copy it back over `ropes_store.json` with the server stopped to
+restore them. A segment missing its dimension or posts is dropped with a warning (the original
+file is kept the same way). An unreadable `ropes.json` is likewise kept as `.corrupt-*` and the
+defaults are used for that run; every knob is clamped to a safe range on load.
 
 ```jsonc
 {
@@ -115,11 +132,13 @@ Knobs live in a separate **`config/ropes.json`**:
 ```jsonc
 {
   "maxSpanBlocks": 11,        // per-segment ceiling (clamped 1–11; vanilla snaps at 12)
+  "maxSegments": 2000,        // server-wide segment cap (0–100000)
   "dropRopeOnBreak": true,    // drop a Rope back when a segment is cut / a fence breaks
   "verifyIntervalTicks": 200, // periodic re-verification sweep (0 = boot/chunk-load only)
+  "tieReachBlocks": 6.0,      // /rope tie: how near a survival player must be to both posts (1–16)
   "showKnots": true,          // decorative knot caps at tie-points
-  "knotScale": 0.35,          // knot-cap item_display scale
-  "knotHeadTexture": "",      // optional player-head texture for a themed knot cap
+  "knotScale": 0.35,          // knot-cap item_display scale (0.05–4)
+  "knotHeadTexture": "",      // optional player-head texture (base64 only) for a themed knot cap
   "climbEnabled": true,       // rope climbing (see Climbing section for the rest)
   "climbMinAngleDeg": 75.0, "climbReach": 0.6, "climbLookDeg": 30.0,
   "climbFloorRate": 0.4, "climbVerticalRate": 0.9, "climbMaxRate": 1.8,
@@ -196,7 +215,7 @@ contact point deals normal damage.
   "climbLookDeg": 30.0,          // look-up past this to ascend; else descend
   "climbFloorRate": 0.4,         // curve floor at the gate (see rate note)
   "climbVerticalRate": 0.9,      // curve mid at vertical (config)
-  "climbMaxRate": 1.8,           // hard cap (< ladder 2.35)
+  "climbMaxRate": 1.8,           // hard cap (rates are clamped to 0–2.3, below the ladder's 2.35)
   "climbResetFallWhileTouching": true,
   "climbLog": true,                       // per-session climb log (v0.3.0; see below)
   "climbLogDir": "config/ropes_logs",     // daily NDJSON dir
@@ -269,10 +288,33 @@ all de-risked in a dedicated spike on MC 26.1.2 before this mod was written — 
 
 ```
 ./gradlew build      # requires JDK 25
+./gradlew runServer  # dev server; run dir is dev_run_dir from gradle.properties
 ```
 
-Branch `main` targets 26.2; branch `26.1` is identical code with 26.1.2 dependency pins. CI builds
-both on every push.
+## Branches, CI and releases
+
+| Branch | Minecraft | Jar |
+|---|---|---|
+| `main` | 26.3 | `ropes-<version>+26.3.jar` |
+| `26.2` | 26.2 | `ropes-<version>+26.2.jar` |
+| `26.1` | 26.1.2 | `ropes-<version>+26.1.2.jar` |
+
+Identical code on every branch; only `gradle.properties` differs (loader, fabric-api and the dev
+run dir, following sanctuary's branch of the same Minecraft version). Each jar only loads on its
+own Minecraft line.
+
+Every push and PR builds, runs the unit tests, and boots a real Fabric server three times
+(`scripts/server_test.py`): config clamping, the store, the commands, tying and cutting a rope,
+an undamageable endpoint, a rope's chunk unloaded and reloaded with exactly one endpoint left,
+stray rope entities removed, then a restart on a corrupt store that must be backed up (not wiped,
+and its ropes' entities left alone), and a restart on the restored store with a malformed entry
+that must be dropped, not crash the tick. The right-click path, `/rope tie`'s reach and cost,
+climbing and shears need a player, so they stay with the mineflayer harness.
+
+Releases are per line: push a tag `v<mod_version>+<minecraft_version>` (for example
+`v0.3.1+26.1.2`) on that line's branch. CI checks the tag against the commit, builds, runs the
+server test, and publishes the jar as a [GitHub release](../../releases) with notes from
+`CHANGELOG.md`. Only `main` releases are marked latest.
 
 ## License
 

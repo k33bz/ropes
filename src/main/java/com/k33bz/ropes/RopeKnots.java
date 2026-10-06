@@ -56,7 +56,8 @@ public final class RopeKnots {
     }
 
     private static void cap(ServerLevel level, String segTag, double x, double y, double z) {
-        String tex = Ropes.CONFIG.knotHeadTexture;
+        // Base64 only: the value is pasted into a console-permission summon command
+        String tex = RopeChecks.cleanTexture(Ropes.CONFIG.knotHeadTexture);
         String item;
         if (tex != null && !tex.isBlank()) {
             item = "item:{id:\"minecraft:player_head\",count:1,components:{\"minecraft:profile\":"
