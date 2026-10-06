@@ -11,6 +11,7 @@ import net.minecraft.core.BlockPos;
 import net.minecraft.network.chat.Component;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
+import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.phys.Vec3;
 
 import java.util.Locale;
@@ -124,7 +125,12 @@ public final class RopeCommands {
             src.sendFailure(Component.literal("Players only."));
             return 0;
         }
-        player.getInventory().placeItemBackInInventory(RopeItem.create(count));
+        // add + drop the rest: placeItemBackInInventory gained a Prediction argument in 26.3,
+        // and these two read the same on every Minecraft line
+        ItemStack ropes = RopeItem.create(count);
+        if (!player.getInventory().add(ropes) && !ropes.isEmpty() && player.level() instanceof ServerLevel sl) {
+            player.spawnAtLocation(sl, ropes);
+        }
         src.sendSuccess(() -> Component.literal(String.format(Locale.ROOT, "Gave %d Rope.", count))
                 .withStyle(ChatFormatting.GOLD), false);
         return count;
