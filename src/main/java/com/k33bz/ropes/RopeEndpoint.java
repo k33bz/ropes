@@ -23,7 +23,8 @@ import java.util.UUID;
  *
  * <p>The endpoint is a <b>bat</b> (small, leashable — confirmed in the spike over allay/pig/
  * chicken) made {@code Invisible / NoGravity / Silent / NoAI / PersistenceRequired} and pinned in
- * place, so it never wanders, sinks, makes noise, or despawns. It sits AT fence B and is leashed
+ * place, so it never wanders, sinks, makes noise, or despawns. Ropes' event hooks keep it from
+ * taking damage and from being interacted with (shears would unleash it and drop a free lead). It sits AT fence B and is leashed
  * to fence A's knot; the leash is the visible rope.</p>
  */
 public final class RopeEndpoint {
@@ -109,7 +110,8 @@ public final class RopeEndpoint {
         bat.setSilent(true);
         bat.setNoAi(true);
         bat.setPersistenceRequired();
-        bat.setInvulnerable(true);
+        // No setInvulnerable: it became setPermanentlyInvulnerable in 26.3. Endpoints are kept
+        // undamageable by Ropes' ALLOW_DAMAGE hook instead, the same code on every Minecraft line.
         bat.setResting(false);
         bat.noPhysics = true; // no block collision — never nudged by physics
         bat.setCustomName(Component.literal("Rope"));
