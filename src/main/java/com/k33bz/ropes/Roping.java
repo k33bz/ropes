@@ -2,17 +2,25 @@ package com.k33bz.ropes;
 
 import net.minecraft.core.BlockPos;
 import net.minecraft.network.chat.Component;
+import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.tags.BlockTags;
+import net.minecraft.world.level.ChunkPos;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.Leashable;
 import net.minecraft.world.entity.decoration.LeashFenceKnotEntity;
 import net.minecraft.world.level.block.Block;
 
+import java.util.ArrayList;
+import java.util.Collections;
 import java.util.HashMap;
+import java.util.IdentityHashMap;
+import java.util.Iterator;
+import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
 
 /**
@@ -30,8 +38,23 @@ public final class Roping {
     private Roping() {
     }
 
-    /** Per-player pending anchor: the first fence they clicked, waiting for a second. */
-    private static final Map<UUID, BlockPos> PENDING = new HashMap<>();
+    /** A first fence clicked, waiting for a second, and the dimension it is in. */
+    private record Pending(String dim, BlockPos pos) {
+    }
+
+    /**
+     * Per-player pending anchor. It remembers its dimension: a bare position armed in one world
+     * used to be paired with a fence at the same coordinates in another (0.3.1).
+     */
+    private static final Map<UUID, Pending> PENDING = new HashMap<>();
+
+    /**
+     * Segments waiting for their chunks' entities before they can be verified (0.3.1). A chunk's
+     * block data loads first and its entities arrive later, off-thread; verifying before then saw
+     * the endpoint bat and the knot as "lost" and spawned new ones, so every reload of a rope's
+     * chunk added another invisible bat. Identity-keyed: a segment is the same object while stored.
+     */
+    private static final Set<RopeStore.Segment> AWAITING = Collections.newSetFromMap(new IdentityHashMap<>());
 
     // ------------------------------------------------------------------ helpers
 
@@ -61,9 +84,11 @@ public final class Roping {
     public static boolean onRightClickFence(ServerLevel level, ServerPlayer player, BlockPos fence,
                                              boolean consumeItem) {
         UUID id = player.getUUID();
-        BlockPos anchor = PENDING.get(id);
+        String dim = level.dimension().identifier().toString();
+        Pending pending = PENDING.get(id);
+        BlockPos anchor = pending != null && pending.dim().equals(dim) ? pending.pos() : null;
         if (anchor == null) {
-            PENDING.put(id, fence.immutable());
+            PENDING.put(id, new Pending(dim, fence.immutable()));
             feedback(player, "Rope anchored — right-click a second fence within "
                     + Ropes.CONFIG.maxSpanBlocks + " blocks.");
             return true;
@@ -93,6 +118,30 @@ public final class Roping {
         var main = player.getMainHandItem();
         if (RopeItem.isRope(main) && !player.isCreative()) {
             main.shrink(1);
+        }
+    }
+
+    /** Whether the player carries a Rope anywhere in their inventory. */
+    public static boolean hasRope(ServerPlayer player) {
+        var inv = player.getInventory();
+        for (int i = 0; i < inv.getContainerSize(); i++) {
+            if (RopeItem.isRope(inv.getItem(i))) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /** Take one Rope from anywhere in the player's inventory ({@code /rope tie} pays like a right-click). */
+    public static void takeOneRope(ServerPlayer player) {
+        var inv = player.getInventory();
+        for (int i = 0; i < inv.getContainerSize(); i++) {
+            var stack = inv.getItem(i);
+            if (RopeItem.isRope(stack)) {
+                stack.shrink(1);
+                inv.setChanged();
+                return;
+            }
         }
     }
 
@@ -228,17 +277,19 @@ public final class Roping {
 
     /** Discard the endpoint bat if it is still present (removes its leash automatically). */
     static void discardEndpoint(ServerLevel level, RopeStore.Segment seg) {
-        try {
-            Entity e = level.getEntity(UUID.fromString(seg.endpointUuid));
-            if (e != null) {
-                if (e instanceof Leashable l && l.isLeashed()) {
-                    l.removeLeash();
-                }
-                e.discard();
-            }
-        } catch (IllegalArgumentException ignored) {
-            // bad UUID string — nothing to discard
+        UUID id = RopeChecks.parseUuid(seg.endpointUuid);
+        Entity e = id == null ? null : level.getEntity(id); // missing/bad UUID: nothing to discard
+        if (e != null) {
+            discardQuietly(e);
         }
+    }
+
+    /** Remove an endpoint without it dropping a lead: unleash first, then discard. */
+    static void discardQuietly(Entity e) {
+        if (e instanceof Leashable l && l.isLeashed()) {
+            l.removeLeash();
+        }
+        e.discard();
     }
 
     /**
@@ -279,6 +330,11 @@ public final class Roping {
      * (now) healthy, false if it had to be dropped as unrecoverable.
      */
     public static boolean verifySegment(ServerLevel level, RopeStore.Segment seg) {
+        if (!entitiesReady(level, seg)) {
+            // Not loaded yet: judging now would read a missing bat as lost (and force-load chunks).
+            AWAITING.add(seg);
+            return true;
+        }
         BlockPos fenceA = new BlockPos(seg.fenceA[0], seg.fenceA[1], seg.fenceA[2]);
         BlockPos fenceB = new BlockPos(seg.fenceB[0], seg.fenceB[1], seg.fenceB[2]);
         // If either fence is gone, the segment is dead — clean it up like a break.
@@ -286,12 +342,8 @@ public final class Roping {
             cut(level, seg);
             return false;
         }
-        Entity e = null;
-        try {
-            e = level.getEntity(UUID.fromString(seg.endpointUuid));
-        } catch (IllegalArgumentException ignored) {
-            // fall through: re-spawn
-        }
+        UUID endpointId = RopeChecks.parseUuid(seg.endpointUuid);
+        Entity e = endpointId == null ? null : level.getEntity(endpointId); // null: re-spawn below
         LeashFenceKnotEntity knot = LeashFenceKnotEntity.getOrCreateKnot(level, fenceA);
         if (e instanceof net.minecraft.world.entity.ambient.Bat bat && RopeEndpoint.isEndpoint(bat)) {
             if (bat instanceof Leashable l && l.isLeashed() && l.getLeashHolder() == knot) {
@@ -323,13 +375,60 @@ public final class Roping {
         return true;
     }
 
-    /** Re-verify every stored segment (boot + periodic). Snapshot to avoid concurrent-mod. */
+    /**
+     * Re-verify every stored segment of this level whose chunks have their entities loaded
+     * (periodic sweep). Segments elsewhere are left alone: reading their blocks would force-load
+     * the chunks, and their entities would not be there yet anyway. They are verified when their
+     * chunks load (see {@link #queueVerify}). Snapshot to avoid concurrent-mod.
+     */
     public static void verifyAll(ServerLevel level) {
         String dim = level.dimension().identifier().toString();
-        for (RopeStore.Segment s : new java.util.ArrayList<>(RopeStore.segments())) {
-            if (s.dim.equals(dim)) {
+        for (RopeStore.Segment s : new ArrayList<>(RopeStore.segments())) {
+            if (s.dim.equals(dim) && entitiesReady(level, s)) {
                 verifySegment(level, s);
             }
         }
+    }
+
+    /** Verify {@code seg} once both of its chunks have their entities loaded and ticking. */
+    public static void queueVerify(RopeStore.Segment seg) {
+        AWAITING.add(seg);
+    }
+
+    /**
+     * Verify the queued segments whose entities have arrived. Drops queued segments that were cut
+     * in the meantime; the rest wait (a segment whose chunk unloads again just keeps waiting).
+     */
+    public static void drainAwaiting(MinecraftServer server) {
+        if (AWAITING.isEmpty()) {
+            return;
+        }
+        Map<String, ServerLevel> levels = new HashMap<>();
+        for (ServerLevel level : server.getAllLevels()) {
+            levels.put(level.dimension().identifier().toString(), level);
+        }
+        List<RopeStore.Segment> ready = new ArrayList<>();
+        for (Iterator<RopeStore.Segment> it = AWAITING.iterator(); it.hasNext(); ) {
+            RopeStore.Segment s = it.next();
+            ServerLevel level = levels.get(s.dim);
+            if (level == null || !RopeStore.contains(s)) {
+                it.remove(); // cut, or its dimension is gone
+            } else if (entitiesReady(level, s)) {
+                it.remove();
+                ready.add(s);
+            }
+        }
+        for (RopeStore.Segment s : ready) {
+            verifySegment(levels.get(s.dim), s);
+        }
+    }
+
+    /**
+     * Whether both posts' chunks are entity-ticking with their entities loaded. Only then does a
+     * missing endpoint bat or knot really mean it is gone.
+     */
+    static boolean entitiesReady(ServerLevel level, RopeStore.Segment seg) {
+        return level.areEntitiesActuallyLoadedAndTicking(new ChunkPos(seg.fenceA[0] >> 4, seg.fenceA[2] >> 4))
+                && level.areEntitiesActuallyLoadedAndTicking(new ChunkPos(seg.fenceB[0] >> 4, seg.fenceB[2] >> 4));
     }
 }
