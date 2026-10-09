@@ -273,8 +273,8 @@ public final class RopeClimb {
 
     /**
      * Headroom gate: is the block the player's head would rise into solid? Checks the block at the
-     * player's eye level and the one above it. Uses {@code blocksMotion()} (true for solid
-     * collidable blocks) — the definitive "would I suffocate / be blocked rising" test.
+     * player's eye level and the one above it. A block with any collision shape counts — the
+     * "would I suffocate / be blocked rising" test.
      */
     private static boolean headBlocked(ServerPlayer player, ServerLevel level) {
         BlockPos head = BlockPos.containing(player.getX(), player.getEyeY(), player.getZ());
@@ -283,8 +283,10 @@ public final class RopeClimb {
     }
 
     private static boolean blocks(ServerLevel level, BlockPos pos) {
+        // Collision shape, not blocksMotion(): that method is gone in 26.3, and this reads the same
+        // on every Minecraft line.
         BlockState state = level.getBlockState(pos);
-        return state.blocksMotion();
+        return !state.getCollisionShape(level, pos).isEmpty();
     }
 
     // ------------------------------------------------------------ session end
